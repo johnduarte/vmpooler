@@ -23,12 +23,16 @@ end
 
 if torun.include? 'api'
   api = Thread.new do
-    thr = Vmpooler::API.new
     redis = Vmpooler.new_redis(redis_host, redis_port, redis_password)
-    thr.helpers.configure(config, redis, metrics)
-    thr.helpers.execute!
+    Vmpooler::API.execute(config, redis, metrics)
   end
   torun_threads << api
+elsif metrics.respond_to?(:setup_prometheus_metrics)
+  # This is only needed if we are using prometheus metrics
+  prom_api = Thread.new do
+    Vmpooler::PrometheusAPI.execute(metrics)
+  end
+  torun_threads << prom_api
 end
 
 if torun.include? 'manager'
