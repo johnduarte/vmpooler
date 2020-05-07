@@ -1,5 +1,4 @@
 require 'spec_helper'
-require 'vmpooler/statsd'
 
 describe 'statsd' do
 
