@@ -24,11 +24,15 @@ module Vmpooler
       # Initialiser simply creates the instance - we deliberately don't wish to
       # touch the registry until Sinatra::Base has been initialised otherwise
       # confusion reigns with the middleware.
-      @prefix = params['prefix']
-      @metrics_prefix = params['metrics_prefix']
-      @endpoint = params['endpoint']
+      @prefix = params['prefix'] || 'vmpooler'
+      @metrics_prefix = params['metrics_prefix'] || 'vmpooler'
+      @endpoint = params['endpoint'] || '/prometheus'
 
+      # Hmm - think this is breaking the logger .....
       @logger = params.delete('logger') || Logger.new(STDOUT)
+
+      # Thinking aloud - if we put this here - should we just go ahead an initialise the metrics table now?
+      @prometheus = Prometheus::Client.registry
     end
 
     # Metrics structure used to register the metrics and also translate/interpret the incoming metrics.
@@ -202,8 +206,6 @@ module Vmpooler
     # Top level method to register all the prometheus metrics.
 
     def setup_prometheus_metrics
-      @prometheus = Prometheus::Client.registry
-
       @p_metrics = vmpooler_metrics_table
       @p_metrics.each do |_name, metric_spec|
         if metric_spec.key? :metric_suffixes
@@ -255,11 +257,16 @@ module Vmpooler
       metric
     end
 
-    # Catch and log metrics failures so they can be noted, but don't interrupt vmpooler operation.
+    # Helper to get lab metrics.
+    def get(label)
+      metric = find_metric(label)
+      [metric, @prometheus.get(metric[:metric_name])]
+    end
+
+    # Note - Catch and log metrics failures so they can be noted, but don't interrupt vmpooler operation.
     def increment(label)
       begin
-        counter_metric = find_metric(label)
-        c = @prometheus.get(counter_metric[:metric_name])
+        counter_metric, c = get(label)
         c.increment(labels: counter_metric[:labels])
       rescue StandardError => e
         @logger.log('s', "[!] prometheus error logging metric #{label} increment : #{e}")
@@ -269,8 +276,7 @@ module Vmpooler
     def gauge(label, value)
       begin
         unless value.nil?
-          gauge_metric = find_metric(label)
-          g = @prometheus.get(gauge_metric[:metric_name])
+          gauge_metric, g = get(label)
           g.set(value.to_i, labels: gauge_metric[:labels])
         end
       rescue StandardError => e
@@ -282,8 +288,7 @@ module Vmpooler
       begin
         # https://prometheus.io/docs/practices/histograms/
         unless duration.nil?
-          histogram_metric = find_metric(label)
-          hm = @prometheus.get(histogram_metric[:metric_name])
+          histogram_metric, hm = get(label)
           hm.observe(duration.to_f, labels: histogram_metric[:labels])
         end
       rescue StandardError => e
